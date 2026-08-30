@@ -24,6 +24,7 @@ Runs the full end-to-end sequence: start services -> init iceberg tables -> gene
 make up              # Start up all containers
 make init-tables     # Create Iceberg schemas and tables in Trino
 make generate-data   # Generate synthetic banking data
+make generate-token  # Generate token
 make test            # Run all compliance scenario tests
 make down            # Stop and remove all containers
 ```
