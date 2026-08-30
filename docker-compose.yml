@@ -1,0 +1,158 @@
+services:
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    networks: [datamesh]
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_POLICY_PLUGIN_URL: http://opal-client:8181/v1/data/datamesh/storage/allow
+    volumes:
+      - minio-data:/data
+    command: server /data --console-address ":9001"
+    depends_on:
+      opal-client:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Initialise MinIO buckets
+  minio-init:
+    image: minio/mc:latest
+    container_name: minio-init
+    networks: [datamesh]
+    depends_on:
+      minio:
+        condition: service_healthy
+      opal-client:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+        mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} &&
+        mc mb --ignore-existing local/${MINIO_CUSTOMER_BUCKET} &&
+        mc mb --ignore-existing local/${MINIO_DEPOSITS_BUCKET} &&
+        mc mb --ignore-existing local/${MINIO_AUDIT_BUCKET} &&
+        mc admin user add local data-analyst analyst-secret 2>/dev/null || true &&
+        mc admin user add local data-steward steward-secret 2>/dev/null || true &&
+        mc admin user add local data-owner   owner-secret   2>/dev/null || true &&
+        mc admin user add local unknown-user  unauth-secret  2>/dev/null || true &&
+        echo 'Buckets and users ready.'
+      "
+
+  # Receives OPA decision log batches over HTTP and send them to MinIO.
+  decision-log-receiver:
+    image: python:3.11-slim
+    container_name: decision-log-receiver
+    networks: [datamesh]
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./scripts/decision_log_receiver.py:/app/decision_log_receiver.py:ro
+    environment:
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_AUDIT_BUCKET: ${MINIO_AUDIT_BUCKET}
+    command: sh -c "pip install --quiet boto3 && python /app/decision_log_receiver.py"
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  nessie:
+    image: projectnessie/nessie:latest
+    container_name: nessie
+    networks: [datamesh]
+    ports:
+      - "${NESSIE_PORT}:19120"
+    environment:
+      QUARKUS_OTEL_SDK_DISABLED: "true"
+    volumes:
+      - nessie-data:/var/lib/nessie
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:19120/api/v1/config"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  trino:
+    image: trinodb/trino:latest
+    container_name: trino
+    networks: [datamesh]
+    ports:
+      - "${TRINO_PORT}:8080"
+    volumes:
+      - ./trino/etc:/etc/trino
+      - ./trino/catalog:/etc/trino/catalog
+    depends_on:
+      nessie:
+        condition: service_healthy
+      opal-client:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/info"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  opal-server:
+    image: permitio/opal-server:latest
+    container_name: opal-server
+    networks: [datamesh]
+    ports:
+      - "${OPAL_SERVER_PORT}:7002"
+    environment:
+      OPAL_POLICY_REPO_URL: ${OPAL_POLICY_REPO_URL}
+      OPAL_POLICY_REPO_MAIN_BRANCH: ${OPAL_POLICY_REPO_MAIN_BRANCH:-main}
+      OPAL_POLICY_SUBSCRIPTION_DIRS: ${OPAL_POLICY_SUBSCRIPTION_DIRS:-policies}
+      OPAL_POLICY_REPO_POLLING_INTERVAL: ${OPAL_POLICY_REPO_POLLING_INTERVAL:-30}
+      DD_TRACE_ENABLED: "false"
+      DD_DOGSTATSD_DISABLE: "true"
+    volumes:
+      - opal-data:/opal
+
+  # opal-client runs its own OPA instance internally on :8181
+  opal-client:
+    image: permitio/opal-client:latest
+    container_name: opal-client
+    networks: [datamesh]
+    ports:
+      - "${OPA_PORT}:8181"
+      - "${OPAL_CLIENT_PORT}:7000"
+    volumes:
+      - ./opa/opa-config.yaml:/opal/opa-config.yaml:ro
+    environment:
+      OPAL_SERVER_URL: http://opal-server:7002
+      OPAL_POLICY_STORE_URL: http://localhost:8181
+      OPAL_INLINE_OPA_ENABLED: "true"
+      OPAL_INLINE_OPA_CONFIG: >
+        {"addr": "0.0.0.0:8181", "log_level": "info", "config_file": "/opal/opa-config.yaml"}
+    depends_on:
+      - opal-server
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8181/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 45s
+
+networks:
+  datamesh:
+    driver: bridge
+
+volumes:
+  minio-data:
+  nessie-data:
+  opal-data:

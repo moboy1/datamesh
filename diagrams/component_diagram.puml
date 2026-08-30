@@ -1,0 +1,113 @@
+@startuml
+title Component Diagram: Containerised Data Mesh Policy-as-Code Architecture
+
+actor "Data Analyst" as User
+actor "Governance\nAdministrator" as Admin
+
+package "Client Layer" {
+  component "SQL Client\n(DBeaver / CLI / Application)" as Client
+  component "JWT Authentication\n(PyJWT)" as JWT
+}
+
+package "Query & Governance Layer" {
+  component "Trino\nFederated SQL Engine" as Trino
+  component "OPA\n(Open Policy Agent)\nPolicy Decision Point" as OPA
+  component "OPAL Server\nPolicy Distribution" as OPAL
+  component "Git Repository\nRego Policies" as Git
+  component "Policy Bundle\nService" as Bundle
+}
+
+package "Metadata Layer" {
+  component "Project Nessie\nVersioned Catalog" as Nessie
+  component "Apache Iceberg\nOpen Table Format" as Iceberg
+}
+
+package "Storage Layer" {
+  database "Customer Domain\nMinIO Bucket" as Customer
+  database "Deposits Domain\nMinIO Bucket" as Deposits
+}
+
+package "Testing & Monitoring Layer" {
+  component "Pytest\nCompliance Tests" as Pytest
+  component "OPA Decision Logs" as Logs
+  component "Audit Reports" as Audit
+}
+
+User --> Client
+Client --> User
+Client --> JWT : Authenticate
+JWT --> Client : JWT Token
+Client --> Trino : SQL Query + JWT
+Trino --> Client
+Trino --> OPA : Authorization Request\n(RBAC only - datamesh.query.allow)
+OPA --> Trino : Allow / Deny
+Trino --> Nessie : Resolve Metadata
+Nessie --> Iceberg
+Iceberg --> Customer : Read Customer Tables
+Customer --> Iceberg
+Iceberg --> Deposits : Read Deposit Tables
+Deposits --> Iceberg
+Iceberg --> Trino
+
+Admin --> Git : Commit Policy
+Git --> OPAL : Repository Update
+OPAL --> Bundle : Build Bundle
+Bundle --> OPA : Push Bundle
+OPA --> Logs : Decision Logs
+Pytest --> Trino : Execute Test Queries
+Pytest --> OPA : Masking Decision\n(masked_columns) - applied client-side
+Pytest --> OPA : Cross-Domain Decision\n(crossdomain.allow) - checked client-side
+Pytest --> Logs : Verify Decisions
+Logs --> Audit
+
+note right of OPA
+  Rego Policy Enforcement
+  • RBAC
+  • Column Masking
+  • Cross-Domain Restriction
+  • GDPR Article 5
+  • BCBS 239
+  • FCA Compliance
+end note
+
+note right of OPAL
+  Continuous Policy Distribution
+  • Watches Git
+  • Builds Bundles
+  • Pushes Policies
+  • Zero Downtime Updates
+end note
+
+note bottom of Nessie
+  Git-like Metadata Versioning
+  • Branches
+  • Commits
+  • Tags
+  • Isolated Catalog
+end note
+
+note bottom of Iceberg
+  Open Table Format
+  • ACID Transactions
+  • Schema Evolution
+  • Time Travel
+  • Snapshot Metadata
+end note
+
+note right of Customer
+  Customer Data
+  • customer_records
+  • pii_fields
+  • contact_details
+  • personal_information
+end note
+
+note right of Deposits
+  Deposits Data
+  • deposit_accounts
+  • balances
+  • transactions
+  • risk_information
+end note
+
+@enduml

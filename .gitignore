@@ -1,0 +1,29 @@
+# Environment — contains secrets
+.env
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+venv/
+.venv/
+
+# Test reports
+tests/report.html
+tests/assets/
+
+# OPA logs
+logs/
+
+# macOS
+.DS_Store

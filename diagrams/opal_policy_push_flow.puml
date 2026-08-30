@@ -1,0 +1,136 @@
+@startuml
+title Sequence Diagram 2: OPAL Policy Synchronization and Distribution Workflow
+
+actor "Governance\nAdministrator" as Admin
+participant "Git Repository\n(Rego Policies)" as Git
+participant "OPAL Server" as OPAL
+participant "Policy Bundle\nService" as Bundle
+participant "OPA\nPolicy Decision Point" as OPA
+participant "Trino\nQuery Engine" as Trino
+actor "User" as User
+
+== Policy Authoring ==
+
+Admin -> Git : Commit Updated Rego Policy
+activate Git
+note right of Git
+  Examples:
+  • RBAC
+  • Column Masking
+  • Cross-Domain Restriction
+  • Compliance Rules
+end note
+Git --> Admin : Commit Successful
+deactivate Git
+
+== Repository Monitoring ==
+
+loop Continuous Monitoring
+    OPAL -> Git : Poll / Webhook Event
+
+    alt New Commit Detected
+        Git --> OPAL : Updated Policy Files
+        activate OPAL
+
+        note right of OPAL
+          Detect:
+          • Added Policies
+          • Updated Policies
+          • Deleted Policies
+        end note
+
+        OPAL -> OPAL : Validate Rego Syntax
+        OPAL -> OPAL : Validate Bundle Integrity
+
+        alt Validation Successful
+            OPAL -> Bundle : Create Policy Bundle
+            activate Bundle
+            Bundle --> OPAL : Bundle Ready
+            deactivate Bundle
+
+            == Policy Distribution ==
+
+            OPAL -> OPA : Push Updated Bundle
+            activate OPA
+            note right of OPA
+              Load New Policies
+              Replace Previous Bundle
+              Update Decision Cache
+            end note
+            OPA --> OPAL : Bundle Loaded Successfully
+            deactivate OPA
+
+            == Runtime Synchronization ==
+
+            OPAL -> Trino : Notify Policy Refresh
+            activate Trino
+            note right of Trino
+              No Restart Required
+
+              All New Queries
+              use Updated Policies
+              immediately
+            end note
+            Trino --> OPAL : Synchronization Complete
+            deactivate Trino
+        else Validation Failed
+            OPAL --> Admin : Validation Error
+            note right of OPAL
+              Invalid Rego
+              or Bundle Structure
+            end note
+        end
+        deactivate OPAL
+    else No Policy Changes
+        OPAL --> Git : No Updates
+    end
+end
+
+== Runtime Query Evaluation ==
+
+User -> Trino : Execute SQL Query
+activate Trino
+Trino -> OPA : Policy Decision Request
+activate OPA
+note right of OPA
+  Latest Policy Version
+
+  is already active
+
+  (No Restart Required)
+end note
+OPA --> Trino : Allow / Deny Decision
+deactivate OPA
+Trino --> User : Query Result
+deactivate Trino
+
+== Audit Logging ==
+
+OPA -> OPA : Record Policy Version
+OPA -> OPA : Record Decision Log
+OPA -> OPA : Record Timestamp
+OPA -> OPA : Record Compliance Mapping
+
+note right of OPA
+  Audit Metadata
+
+  • Policy Version
+
+  • Git Commit ID
+
+  • Timestamp
+
+  • Decision
+
+  • User
+
+  • Resource
+
+  • GDPR
+
+  • BCBS239
+
+  • FCA
+end note
+
+@enduml

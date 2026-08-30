@@ -1,0 +1,124 @@
+@startuml
+title Sequence Diagram 1: JWT Authentication and Policy Enforcement Workflow
+
+actor "Data Analyst" as Analyst
+participant "Client\n(SQL Client / Application)" as Client
+participant "JWT Authentication\nService" as JWTAuth
+participant "Trino\nFederated SQL Engine" as Trino
+participant "OPA\nPolicy Decision Point" as OPA
+participant "Project Nessie\nMetadata Catalog" as Nessie
+participant "Apache Iceberg" as Iceberg
+database "MinIO\nCustomer Domain" as MinIOCust
+database "MinIO\nDeposits Domain" as MinIODep
+
+== User Authentication ==
+
+Analyst -> Client : Login(username,password)
+Client -> JWTAuth : Authenticate Credentials
+activate JWTAuth
+JWTAuth --> Client : JWT Token\n(role, domain, expiry)
+deactivate JWTAuth
+Client --> Analyst : Authentication Successful
+
+== Query Submission ==
+
+Analyst -> Client : Execute SQL Query
+activate Client
+Client -> Trino : SQL Query + JWT Token
+activate Trino
+
+note right of Trino
+  Extract JWT claims:
+  • User Role
+  • Domain
+  • Permissions
+  • Expiry
+end note
+
+== Policy Evaluation ==
+
+Trino -> OPA : Evaluate Access Request\n(User Claims + SQL Query)
+activate OPA
+
+note right of OPA
+  Rego Policies Evaluate:
+  • RBAC (native to Trino)
+end note
+
+alt Access Allowed
+    OPA --> Trino : Allow
+    deactivate OPA
+    Trino -> Nessie : Resolve Iceberg Metadata
+    activate Nessie
+    Nessie --> Trino : Table Metadata
+    deactivate Nessie
+    Trino -> Iceberg : Read Table Snapshot
+    activate Iceberg
+
+    alt Customer Domain
+        Iceberg -> MinIOCust : Read Customer Data
+        activate MinIOCust
+        MinIOCust --> Iceberg : Records
+        deactivate MinIOCust
+    else Deposits Domain
+        Iceberg -> MinIODep : Read Deposit Data
+        activate MinIODep
+        MinIODep --> Iceberg : Records
+        deactivate MinIODep
+    end
+
+    note right of Iceberg
+      No domain check here
+    end note
+
+    Iceberg --> Trino : Query Result
+    deactivate Iceberg
+
+    note right of Trino
+      No masking applied here
+    end note
+
+    Trino --> Client : Full Result Set\n(plaintext PII included)
+    deactivate Trino
+
+    Client -> OPA : POST /v1/data/datamesh/masking/masked_columns
+    activate OPA
+    OPA --> Client : masked_columns for this role
+    deactivate OPA
+
+    Client -> Client : Redact masked_columns\n('***' substitution)
+
+    note right of Client
+      Masking applied here (app),
+      not inside Trino
+    end note
+
+    Client --> Analyst : Display Response
+else Access Denied
+    OPA --> Trino : Deny
+    deactivate OPA
+    Trino --> Client : HTTP 403 Forbidden\nPolicy Violation
+    deactivate Trino
+    Client --> Analyst : Display Response
+end
+
+deactivate Client
+
+== Audit Logging ==
+
+Trino -> OPA : Record Decision Metadata
+
+note right of OPA
+  Audit Information
+  • User ID
+  • Role
+  • Domain
+  • SQL Statement
+  • Policy Version
+  • Decision
+  • Timestamp
+  • Compliance Rule
+  (GDPR / BCBS239 / FCA)
+end note
+
+@enduml

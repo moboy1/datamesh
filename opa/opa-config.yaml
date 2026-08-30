@@ -1,0 +1,10 @@
+services:
+  - name: decision_log_receiver
+    url: http://decision-log-receiver:8090
+
+decision_logs:
+  service: decision_log_receiver
+  resource: /logs
+  reporting:
+    min_delay_seconds: 1
+    max_delay_seconds: 3
