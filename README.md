@@ -16,7 +16,43 @@ Runs the full end-to-end sequence: start services -> init iceberg tables -> gene
 - Docker Compose 
 - Python 3.10+
 - OPA CLI
-- `.env` file with `OPAL_POLICY_REPO_URL` set to the Git repo
+- `.env` file (see below)
+
+### Create your `.env` file
+
+Create a `.env` file in the repo root with the following:
+
+```bash
+# MinIO
+MINIO_ROOT_USER=admin
+MINIO_ROOT_PASSWORD=admin1234
+MINIO_CUSTOMER_BUCKET=customer-domain
+MINIO_DEPOSITS_BUCKET=deposits-domain
+MINIO_AUDIT_BUCKET=audit-logs
+
+# Nessie
+NESSIE_PORT=19120
+
+# Trino
+TRINO_PORT=8080
+
+# OPA
+OPA_PORT=8181
+
+# OPAL
+OPAL_SERVER_PORT=7002
+OPAL_CLIENT_PORT=7766
+# Point at the Git repo (policies/ directory). Public repo — no token needed.
+OPAL_POLICY_REPO_URL=https://github.com/moboy1/datamesh
+OPAL_POLICY_REPO_MAIN_BRANCH=master
+OPAL_POLICY_SUBSCRIPTION_DIRS=policies
+OPAL_POLICY_REPO_POLLING_INTERVAL=30
+
+# JWT signing
+JWT_SECRET=datamesh-dev-secret-change-in-prod
+```
+
+NOTE: `JWT_SECRET` must match the `jwt_secret` value hardcoded in `policies/*.rego`. Tokens signed with a different secret will fail OPA's signature check. If `OPAL_POLICY_REPO_URL` points at a private repo instead, embed a token: `https://oauth2:<token>@gitlab.com/<org>/<repo>` (GitLab) or `https://<token>@github.com/<org>/<repo>` (GitHub).
 
 ### Step-by-step
 
